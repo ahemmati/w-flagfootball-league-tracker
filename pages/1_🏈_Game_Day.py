@@ -4,8 +4,8 @@ import pandas as pd
 import streamlit as st
 
 import data_store as ds
-from ui import (inject_mobile_css, format_game_label, play_clock,
-                check_data_store)
+from ui import (inject_mobile_css, format_game_label, play_clock, timeout_clock,
+                check_data_store, rules_sidebar)
 
 st.set_page_config(
     page_title="Game Day", page_icon="🏈", layout="wide",
@@ -14,8 +14,6 @@ st.set_page_config(
 check_data_store()
 ds.init_db()
 inject_mobile_css()
-
-st.title("🏈 Game Day")
 
 games = ds.get_games(ascending=True)
 if games.empty:
@@ -29,7 +27,15 @@ if players.empty:
 
 
 def default_game_index():
-    """Open on today's game, else the next one coming up, else the last one."""
+    """
+    Honour a game tapped on the schedule; otherwise open today's game, else the
+    next one coming up, else the last one played.
+    """
+    picked = st.session_state.get("selected_game_id")
+    if picked is not None:
+        match = games.index[games["game_id"] == picked].tolist()
+        if match:
+            return match[0]
     today = datetime.date.today().isoformat()
     upcoming = games.index[games["game_date"] >= today].tolist()
     return upcoming[0] if upcoming else len(games) - 1
@@ -42,36 +48,70 @@ choice = st.selectbox(
 )
 game_row = games.iloc[choice]
 game_id = int(game_row["game_id"])
+# Keep the picker and the schedule tap in agreement on later reruns.
+st.session_state["selected_game_id"] = game_id
 
-# ------------------------------------------------------------ Play clock ----
+state = ds.get_game_state(game_id)
+half = state["current_half"]
+
+us, them = ds.get_score(game_id)
+st.title(f"🏈 {ds.TEAM_NAME} {us} — {them} {game_row['opponent']}")
+if ds.mercy_rule_in_effect(game_id):
+    st.info(
+        f"📢 **Mercy rule range** — a {ds.MERCY_RULE_TD_MARGIN}+ touchdown lead "
+        "means the clock runs without stopping from the second-half "
+        "one-minute warning."
+    )
+
+rules_sidebar()
+
+# ------------------------------------------------------------- The clocks ----
 clock_col, state_col = st.columns([1, 1])
 
 with clock_col:
     play_clock()
     st.caption(
-        "Runs in your browser, so it keeps ticking while you log plays. "
-        "Turns red under 5 seconds — snap it before the 3-yard delay of game."
+        f"The referee starts the {ds.PLAY_CLOCK_SECONDS}-second clock on the "
+        "ready-for-play signal. Red under 5 seconds — snap it before the "
+        "3-yard delay of game."
     )
 
-# ------------------------------------------------- Game state & timeouts ----
 with state_col:
-    state = ds.get_game_state(game_id)
-
     st.subheader("Game State")
-    half = st.radio(
-        "Half", [1, 2],
-        index=0 if state["current_half"] == 1 else 1,
-        horizontal=True,
+
+    picked_half = st.radio(
+        "Half", list(range(1, ds.HALVES + 1)),
+        index=half - 1, horizontal=True,
         format_func=lambda h: f"{h}st Half" if h == 1 else f"{h}nd Half",
     )
-    # Only write when it actually changed, otherwise every rerun is a write.
-    if half != state["current_half"]:
-        ds.set_half(game_id, half)
+    if picked_half != half:
+        ds.set_half(game_id, picked_half)
         st.rerun()
 
+    # --- down and distance -------------------------------------------------
+    down = state["current_down"]
+    st.markdown(
+        "".join(
+            f"<span class='down-pill{' active' if d == down else ''}'>{d}</span>"
+            for d in range(1, ds.DOWNS_PER_SERIES + 1)
+        ),
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        f"**Down {down} of {ds.DOWNS_PER_SERIES}** — four downs to cross the "
+        f"next {ds.ZONE_YARDS}-yard zone line for a first down."
+    )
+    d1, d2 = st.columns(2)
+    if d1.button("▶ Next Down", width="stretch", key="next_down"):
+        ds.next_down(game_id)
+        st.rerun()
+    if d2.button("🔄 First Down", width="stretch", key="first_down"):
+        ds.set_down(game_id, 1)
+        st.rerun()
+
+    # --- timeouts ----------------------------------------------------------
     left = ds.timeouts_left(game_id, half)
     used = ds.TIMEOUTS_PER_HALF - left
-
     st.markdown(
         f"<div class='timeout-pill'>{'🟢' * left}{'⚪' * used}</div>",
         unsafe_allow_html=True,
@@ -80,11 +120,9 @@ with state_col:
         f"**{left} of {ds.TIMEOUTS_PER_HALF} timeouts left** "
         f"— {'1st' if half == 1 else '2nd'} half"
     )
-
     t1, t2 = st.columns(2)
     if t1.button(
-        "⏱️ Use Timeout", width="stretch", disabled=left == 0,
-        key="use_timeout",
+        "⏱️ Use Timeout", width="stretch", disabled=left == 0, key="use_timeout"
     ):
         if ds.use_timeout(game_id, half):
             st.rerun()
@@ -92,10 +130,12 @@ with state_col:
         ds.reset_timeouts(game_id, half)
         st.rerun()
 
-    st.caption(
-        f"{ds.TIMEOUTS_PER_HALF} timeouts per half. Each half keeps its own "
-        "count, so the 2nd half starts fresh on its own."
-    )
+    with st.expander(f"⏱️ {ds.TIMEOUT_SECONDS}-second timeout clock"):
+        timeout_clock()
+        st.caption(
+            f"Each timeout is {ds.TIMEOUT_SECONDS} seconds long. "
+            f"{ds.TIMEOUTS_PER_HALF} per half; each half keeps its own count."
+        )
 
 st.divider()
 
@@ -165,30 +205,123 @@ below = summary[summary["Below Avg Snaps"]]["Player"].tolist()
 if below:
     u2.warning(f"⚠️ Below average playing time: {', '.join(below)}")
 
+# ---------------------------------------- Log a whole play (7 on the field) --
+with st.expander(f"Log a full play — {ds.PLAYERS_ON_FIELD} on the field"):
+    st.caption(
+        f"The rule sheet puts {ds.PLAYERS_ON_FIELD} players a side. Tick who "
+        "was out there and log the snap for all of them at once — the fastest "
+        "way to keep playing time honest."
+    )
+    on_field = st.multiselect(
+        "On the field", options=summary["player_id"].tolist(),
+        format_func=lambda pid: summary.set_index("player_id").loc[pid, "Player"],
+        key=f"onfield_{game_id}",
+    )
+    if len(on_field) and len(on_field) != ds.PLAYERS_ON_FIELD:
+        st.warning(
+            f"{len(on_field)} selected — the league plays "
+            f"{ds.PLAYERS_ON_FIELD} a side."
+        )
+    f1, f2 = st.columns(2)
+    qb = f1.selectbox(
+        "QB this play", options=[None] + on_field,
+        format_func=lambda pid: "—" if pid is None
+        else summary.set_index("player_id").loc[pid, "Player"],
+        key=f"qb_sel_{game_id}",
+    )
+    runner = f2.selectbox(
+        "Ball carrier this play", options=[None] + on_field,
+        format_func=lambda pid: "—" if pid is None
+        else summary.set_index("player_id").loc[pid, "Player"],
+        key=f"run_sel_{game_id}",
+    )
+    if st.button(
+        "✅ Log Play", type="primary", width="stretch",
+        disabled=not on_field, key="log_full_play",
+    ):
+        ds.log_play(game_id, half, on_field, qb_id=qb, runner_id=runner)
+        ds.next_down(game_id)
+        st.success(f"Play logged for {len(on_field)} players.")
+        st.rerun()
+
 st.divider()
 
-# ---------------------------------------------------- Live stats + score ----
+# --------------------------------------------------------------- Scoring ----
+st.subheader("🏆 Scoring")
+st.caption(
+    "Touchdown 6 · try 1 point from the 3-yard line or 2 from the 7 · safety 2."
+)
+
+for team, team_label in (("us", ds.TEAM_NAME), ("them", str(game_row["opponent"]))):
+    st.markdown(f"**{team_label}**")
+    score_cols = st.columns(len(ds.SCORING_PLAYS))
+    for col, (play_type, points) in zip(score_cols, ds.SCORING_PLAYS.items()):
+        if col.button(
+            f"{play_type.replace('Try — ', 'Try ')} (+{points})",
+            key=f"score_{team}_{play_type}_{game_id}", width="stretch",
+        ):
+            ds.add_score(game_id, half, team, play_type)
+            st.rerun()
+
+sc1, sc2 = st.columns([1, 3])
+if sc1.button("↩️ Undo Last Score", width="stretch", key="undo_score"):
+    if ds.undo_last_score(game_id):
+        st.rerun()
+    else:
+        st.warning("No scoring plays logged yet.")
+
+scoring = ds.get_scoring_plays(game_id)
+if not scoring.empty:
+    with st.expander(f"Scoring plays ({len(scoring)})"):
+        st.dataframe(scoring, width="stretch", hide_index=True)
+
+st.divider()
+
+# -------------------------------------------------------------- Penalties ----
+st.subheader("🛑 Penalties")
+
+pen_team = st.radio(
+    "Penalty on", ["us", "them"], horizontal=True,
+    format_func=lambda t: ds.TEAM_NAME if t == "us" else str(game_row["opponent"]),
+    key="pen_team",
+)
+
+st.markdown("**3-yard penalties** — dead ball / technical")
+p3 = st.columns(len(ds.PENALTIES_3YD))
+for col, name in zip(p3, ds.PENALTIES_3YD):
+    if col.button(name, key=f"p3_{name}_{game_id}", width="stretch"):
+        ds.log_penalty(game_id, half, pen_team, name)
+        st.rerun()
+
+st.markdown("**6-yard penalties** — live ball / contact")
+p6 = st.columns(4)
+for i, name in enumerate(ds.PENALTIES_6YD):
+    if p6[i % 4].button(name, key=f"p6_{name}_{game_id}", width="stretch"):
+        ds.log_penalty(game_id, half, pen_team, name)
+        st.rerun()
+
+penalties = ds.get_penalties(game_id)
+if not penalties.empty:
+    pc1, pc2 = st.columns([1, 3])
+    if pc1.button("↩️ Undo Last Penalty", width="stretch", key="undo_pen"):
+        ds.undo_last_penalty(game_id)
+        st.rerun()
+    pc2.caption(
+        f"{len(penalties)} logged · "
+        f"{int(penalties['yards'].sum())} penalty yards total"
+    )
+    with st.expander(f"Penalties ({len(penalties)})"):
+        st.dataframe(penalties, width="stretch", hide_index=True)
+
+st.divider()
+
+# ------------------------------------------------------------- Live stats ----
 st.subheader("Live Stats")
 st.dataframe(
     summary[["Player", "Snaps", "QB Snaps", "Runner Snaps", "Touches",
              "Touchdowns", "Met QB/Runner Rule"]],
     width="stretch", hide_index=True,
 )
-
-sc1, sc2, sc3 = st.columns([1, 1, 2])
-our_score = sc1.number_input(
-    "Us", min_value=0,
-    value=int(game_row["our_score"]) if pd.notna(game_row["our_score"]) else 0,
-)
-their_score = sc2.number_input(
-    "Them", min_value=0,
-    value=int(game_row["their_score"]) if pd.notna(game_row["their_score"]) else 0,
-)
-if sc3.button("💾 Save Score", width="stretch", key="save_score"):
-    ds.update_game_score(game_id, our_score, their_score)
-    st.success("Score saved.")
-
-st.divider()
 
 # --------------------------------------------------------- Quick export ----
 st.subheader("📋 Export This Game")
@@ -199,8 +332,6 @@ else:
     st.download_button(
         "⬇️ Download This Game's CSV",
         export_df.to_csv(index=False),
-        file_name=f"game_{game_row['game_date']}_vs_{game_row['opponent']}.csv",
-        mime="text/csv",
-        width="stretch",
-        type="primary",
+        file_name=f"{ds.TEAM_CODE}_{game_row['game_date']}_vs_{game_row['opponent']}.csv",
+        mime="text/csv", width="stretch", type="primary",
     )

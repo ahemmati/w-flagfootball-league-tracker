@@ -16,6 +16,10 @@ import streamlit as st
 
 import data_store as ds
 
+# Streamlit resolves switch_page targets relative to the project root.
+GAME_DAY_PAGE = "pages/1_🏈_Game_Day.py"
+RULES_PAGE = "pages/4_📖_Rules.py"
+
 
 def inject_mobile_css():
     """Bigger tap targets and the card styles used by the Equal Play grid."""
@@ -79,6 +83,26 @@ def inject_mobile_css():
         }
         .has-touch .pc-name, .has-touch .pc-meta { color: inherit; }
 
+        .sched-badge {
+            padding: 0.55rem 0.2rem;
+            font-weight: 600;
+            font-size: 0.95rem;
+            white-space: nowrap;
+        }
+        .down-pill {
+            display: inline-block;
+            background: rgba(128, 128, 128, 0.15);
+            border: 2px solid rgba(128, 128, 128, 0.35);
+            border-radius: 0.5rem;
+            padding: 0.35rem 0.8rem;
+            margin-right: 0.3rem;
+            font-weight: 700;
+        }
+        .down-pill.active {
+            background: rgba(37, 99, 235, 0.2);
+            border-color: #2563eb;
+            color: #2563eb;
+        }
         .timeout-pill {
             display: inline-block;
             font-size: 1.6rem;
@@ -103,20 +127,14 @@ def format_game_label(row):
     return f"{pretty}{time} vs {row['opponent']}"
 
 
-def play_clock(seconds=None, height=320):
+def countdown(seconds, label, storage_key, danger_msg, expired_msg,
+              danger_at=5, warn_at=10, height=320):
     """
-    The 35-second play clock. Big enough to read at arm's length, turns red
-    under 5 seconds so you can get the ball snapped before the 3-yard delay of
-    game penalty.
+    A self-contained countdown clock. Used for both the 35-second play clock
+    and the 30-second timeout, which is why the label, storage key, and
+    messages are all parameters -- two clocks on one page must not share state.
     """
-    # Resolved when called, not in the signature. As a default argument this
-    # would read data_store while ui.py is still being imported, so a stale or
-    # half-loaded data_store took the entire app down at import instead of
-    # failing somewhere recoverable.
-    if seconds is None:
-        seconds = getattr(ds, "PLAY_CLOCK_SECONDS", 35)
-
-    html = """
+    html = r"""
 <!-- self-contained: no external assets, so it works offline on the sideline -->
 <style>
   * { box-sizing: border-box; }
@@ -150,8 +168,8 @@ def play_clock(seconds=None, height=320):
   button:active { transform: translateY(1px); }
 </style>
 <div class="wrap">
-  <div class="label">Play Clock</div>
-  <div id="digits" class="digits">35</div>
+  <div class="label">__LABEL__</div>
+  <div id="digits" class="digits">__TOTAL__</div>
   <div id="msg" class="msg"></div>
   <div class="btns">
     <button class="go" id="startBtn">▶ START</button>
@@ -162,10 +180,10 @@ def play_clock(seconds=None, height=320):
 <script>
 (function () {
   var TOTAL = __TOTAL__ * 1000;
-  var DANGER = 5000;
-  var WARN = 10000;
-  var KEY_DEADLINE = "ffb_pc_deadline";
-  var KEY_PAUSED = "ffb_pc_paused";
+  var DANGER = __DANGER__ * 1000;
+  var WARN = __WARN__ * 1000;
+  var KEY_DEADLINE = "__KEY___deadline";
+  var KEY_PAUSED = "__KEY___paused";
 
   // sessionStorage lets the clock survive a Streamlit rerun (every tap on the
   // page re-renders this component). Fall back to memory if it's unavailable.
@@ -202,10 +220,10 @@ def play_clock(seconds=None, height=320):
     if (ms <= 0) {
       digits.className = "digits expired";
       digits.textContent = "0.0";
-      msg.textContent = "⚠ DELAY OF GAME — 3 YARDS";
+      msg.textContent = "__EXPIRED__";
     } else if (ms <= DANGER) {
       digits.className = "digits danger";
-      if (running) msg.textContent = "SNAP IT NOW";
+      if (running) msg.textContent = "__DANGER__MSG__";
     } else if (ms <= WARN) {
       digits.className = "digits warn";
     }
@@ -237,7 +255,14 @@ def play_clock(seconds=None, height=320):
 })();
 </script>
 """
-    markup = html.replace("__TOTAL__", str(seconds))
+    markup = (html
+              .replace("__DANGER__MSG__", danger_msg)
+              .replace("__EXPIRED__", expired_msg)
+              .replace("__LABEL__", label)
+              .replace("__KEY__", storage_key)
+              .replace("__TOTAL__", str(seconds))
+              .replace("__DANGER__", str(danger_at))
+              .replace("__WARN__", str(warn_at)))
     # st.iframe superseded st.components.v1.html; requirements.txt still allows
     # older Streamlit, so fall back when it isn't there.
     if hasattr(st, "iframe"):
@@ -245,6 +270,36 @@ def play_clock(seconds=None, height=320):
     else:  # pragma: no cover - older Streamlit
         import streamlit.components.v1 as components
         components.html(markup, height=height)
+
+
+def play_clock(seconds=None, height=320):
+    """
+    The 35-second play clock. Big enough to read at arm's length, turns red
+    under 5 seconds so you can get the ball snapped before the 3-yard delay of
+    game penalty. The referee starts it on the ready-for-play signal.
+    """
+    # Resolved when called, not in the signature. As a default argument this
+    # would read data_store while ui.py is still being imported, so a stale or
+    # half-loaded data_store took the entire app down at import instead of
+    # failing somewhere recoverable.
+    if seconds is None:
+        seconds = getattr(ds, "PLAY_CLOCK_SECONDS", 35)
+    countdown(
+        seconds=seconds, label="Play Clock", storage_key="ffb_pc",
+        danger_msg="SNAP IT NOW", expired_msg="⚠ DELAY OF GAME — 3 YARDS",
+        height=height,
+    )
+
+
+def timeout_clock(seconds=None, height=320):
+    """The 30-second timeout the rule sheet allots — two of them per half."""
+    if seconds is None:
+        seconds = getattr(ds, "TIMEOUT_SECONDS", 30)
+    countdown(
+        seconds=seconds, label="Timeout (30s)", storage_key="ffb_to",
+        danger_msg="BREAK THE HUDDLE", expired_msg="⏱ TIMEOUT OVER",
+        height=height,
+    )
 
 
 # Everything the pages need from data_store. Checked up front so a stale
@@ -269,3 +324,43 @@ def check_data_store():
             "Running locally, `git pull` and restart Streamlit."
         )
         st.stop()
+
+
+def rules_sidebar():
+    """The in-game quick reference. Full text lives on the Rules page."""
+    with st.sidebar:
+        st.header("📋 League Rules Quick Ref")
+        st.error(
+            "⚠️ **EQUAL PLAY RULE:** Every player must play an equal amount of "
+            "time, and **must** run the ball or play quarterback for at least "
+            "one snap each game."
+        )
+        st.info(
+            f"⏱️ **TIMING:** Two {ds.HALF_LENGTH_MINUTES}-minute halves, "
+            f"{ds.HALFTIME_BREAK_MINUTES}-minute break. Clock runs continuously "
+            "for the first 19 minutes of each half. One-minute warning, then "
+            "the clock stops per high school rules. **No overtime.**"
+        )
+        st.success(
+            "🔄 **NO CENTER SNAP:** The QB lines up behind the center and "
+            "starts the play already holding the ball. **All players are "
+            "eligible receivers. NO motion.**"
+        )
+        st.warning(
+            "🛑 **PENALTIES:** 3-yard (off-side, false start, delay of game, "
+            "flag guarding, illegal forward pass) · 6-yard (tackling, "
+            "obstruction, illegal screen, charging, roughing the passer, "
+            "personal foul, pass interference)."
+        )
+        st.caption(
+            f"**Timeouts:** {ds.TIMEOUTS_PER_HALF} per half, "
+            f"{ds.TIMEOUT_SECONDS} seconds each · "
+            f"**Play clock:** {ds.PLAY_CLOCK_SECONDS} sec · "
+            f"**{ds.PLAYERS_ON_FIELD} players** a side · "
+            f"**Scoring:** TD 6, try 1 (3 yd) or 2 (7 yd), safety 2 · "
+            f"**Mercy rule:** {ds.MERCY_RULE_TD_MARGIN}+ TDs ahead at the "
+            "second-half one-minute warning."
+        )
+        # No st.page_link here: Streamlit's own sidebar nav already lists the
+        # Rules page, and page_link needs the multipage registry, which isn't
+        # there when a page is opened on its own.

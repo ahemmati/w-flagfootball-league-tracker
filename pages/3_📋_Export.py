@@ -1,13 +1,15 @@
 import streamlit as st
 
 import data_store as ds
-from ui import inject_mobile_css, format_game_label
+from ui import inject_mobile_css, format_game_label, check_data_store
 
 st.set_page_config(page_title="Export", page_icon="📋", layout="wide")
+check_data_store()
 ds.init_db()
 inject_mobile_css()
 
 st.title("📋 Export Game Data")
+st.caption(f"{ds.TEAM_NAME} · Team {ds.TEAM_CODE}")
 st.caption(
     "One tap gets you a clean CSV of player touches and snaps — at the end of "
     "a game or any time. Worth doing after every game: if this app is ever "
@@ -45,10 +47,26 @@ else:
         st.download_button(
             "⬇️ Download This Game's CSV",
             export_df.to_csv(index=False),
-            file_name=f"game_{game_row['game_date']}_vs_{game_row['opponent']}.csv",
+            file_name=f"{ds.TEAM_CODE}_{game_row['game_date']}_vs_{game_row['opponent']}.csv",
             mime="text/csv", width="stretch", type="primary",
         )
         st.dataframe(export_df, width="stretch", hide_index=True)
+
+        scoring = ds.get_scoring_plays(game_id)
+        penalties = ds.get_penalties(game_id)
+        e1, e2 = st.columns(2)
+        if not scoring.empty:
+            e1.download_button(
+                "⬇️ Scoring Plays CSV", scoring.to_csv(index=False),
+                file_name=f"{ds.TEAM_CODE}_{game_row['game_date']}_scoring.csv",
+                mime="text/csv", width="stretch",
+            )
+        if not penalties.empty:
+            e2.download_button(
+                "⬇️ Penalties CSV", penalties.to_csv(index=False),
+                file_name=f"{ds.TEAM_CODE}_{game_row['game_date']}_penalties.csv",
+                mime="text/csv", width="stretch",
+            )
 
 st.divider()
 

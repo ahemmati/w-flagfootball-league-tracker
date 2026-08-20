@@ -24,8 +24,53 @@ import pandas as pd
 
 DB_PATH = Path(__file__).parent / "flagfootball.db"
 
-TIMEOUTS_PER_HALF = 2
-PLAY_CLOCK_SECONDS = 35
+# ---------------------------------------------------------------------------
+# League constants, straight from the Mt. Bethel W League (1st & 2nd) rule
+# sheet. Anything the app enforces or displays traces back to a line in there.
+# ---------------------------------------------------------------------------
+TEAM_NAME = "Silver Dogs"
+TEAM_CODE = "W-5"
+
+PLAYERS_ON_FIELD = 7          # "two teams of seven players each"
+HALVES = 2
+HALF_LENGTH_MINUTES = 20      # "two, 20 minute halves"
+HALFTIME_BREAK_MINUTES = 5
+TIMEOUTS_PER_HALF = 2         # "two time outs per half"
+TIMEOUT_SECONDS = 30          # "thirty (30) seconds in length"
+PLAY_CLOCK_SECONDS = 35       # "Thirty-Five Second Clock: (Rule Change)"
+DOWNS_PER_SERIES = 4          # "four consecutive downs" to reach the next zone
+ZONE_YARDS = 9                # "four 9 yard zones"
+END_ZONE_YARDS = 5
+FIELD_WIDTH_YARDS = 27
+FIELD_LENGTH_YARDS = 47
+START_YARD_LINE = 7           # no kick-off; receiving team starts on its own 7
+MERCY_RULE_TD_MARGIN = 3      # 3+ TDs ahead at the 2nd-half one-minute warning
+
+# Scoring, and what each play is worth.
+SCORING_PLAYS = {
+    "Touchdown": 6,
+    "Try — 1 pt (3 yd line)": 1,
+    "Try — 2 pt (7 yd line)": 2,
+    "Safety": 2,
+}
+
+# Penalties, split by the yardage the rule sheet assigns them.
+PENALTIES_3YD = [
+    "Off-side / Illegal Procedure",
+    "False Start",
+    "Delay of Game",
+    "Flag Guarding / Stiff Arming",
+    "Illegal Forward Pass",
+]
+PENALTIES_6YD = [
+    "Tackling / Tripping / Holding",
+    "Obstruction of Runner",
+    "Illegal Screen Blocking",
+    "Running Over a Player / Charging",
+    "Roughing the Passer",
+    "Personal Foul",
+    "Pass Interference",
+]
 
 # The roster and schedule the season starts with. Seeding is idempotent: a
 # player is matched on name, a game on (date, opponent), so re-running this
@@ -104,6 +149,34 @@ def init_db():
                 current_half INTEGER NOT NULL DEFAULT 1,
                 timeouts_used_h1 INTEGER NOT NULL DEFAULT 0,
                 timeouts_used_h2 INTEGER NOT NULL DEFAULT 0,
+                current_down INTEGER NOT NULL DEFAULT 1,
+                FOREIGN KEY (game_id) REFERENCES games(game_id)
+            )
+        """)
+
+        # Every score, so the running total is built from the rule book's
+        # point values instead of being typed in by hand.
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS scoring_plays (
+                score_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id INTEGER NOT NULL,
+                half INTEGER NOT NULL,
+                team TEXT NOT NULL,            -- 'us' or 'them'
+                play_type TEXT NOT NULL,
+                points INTEGER NOT NULL,
+                player_id INTEGER,
+                FOREIGN KEY (game_id) REFERENCES games(game_id),
+                FOREIGN KEY (player_id) REFERENCES players(player_id)
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS penalties (
+                penalty_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                game_id INTEGER NOT NULL,
+                half INTEGER NOT NULL,
+                team TEXT NOT NULL,            -- 'us' or 'them'
+                name TEXT NOT NULL,
+                yards INTEGER NOT NULL,
                 FOREIGN KEY (game_id) REFERENCES games(game_id)
             )
         """)
@@ -113,6 +186,10 @@ def init_db():
             conn.execute("ALTER TABLE games ADD COLUMN game_time TEXT")
         if "jersey_number" in _columns(conn, "players"):
             conn.execute("ALTER TABLE players DROP COLUMN jersey_number")
+        if "current_down" not in _columns(conn, "game_state"):
+            conn.execute(
+                "ALTER TABLE game_state ADD COLUMN current_down INTEGER NOT NULL DEFAULT 1"
+            )
 
     _seed()
 
@@ -207,14 +284,19 @@ def update_game_score(game_id, our_score, their_score):
 def get_game_state(game_id):
     with get_conn() as conn:
         row = conn.execute(
-            """SELECT current_half, timeouts_used_h1, timeouts_used_h2
+            """SELECT current_half, timeouts_used_h1, timeouts_used_h2, current_down
                FROM game_state WHERE game_id = ?""",
             (game_id,),
         ).fetchone()
         if row is None:
             conn.execute("INSERT INTO game_state (game_id) VALUES (?)", (game_id,))
-            row = (1, 0, 0)
-    return {"current_half": row[0], "timeouts_used_h1": row[1], "timeouts_used_h2": row[2]}
+            row = (1, 0, 0, 1)
+    return {
+        "current_half": row[0],
+        "timeouts_used_h1": row[1],
+        "timeouts_used_h2": row[2],
+        "current_down": row[3],
+    }
 
 
 def set_half(game_id, half):
@@ -468,3 +550,127 @@ def get_export_dataframes():
         games = pd.read_sql_query("SELECT * FROM games", conn)
         snaps = pd.read_sql_query("SELECT * FROM snaps", conn)
     return players, games, snaps
+
+
+def set_down(game_id, down):
+    """Current down, 1 through 4 ('four consecutive downs' to the next zone)."""
+    get_game_state(game_id)
+    down = max(1, min(DOWNS_PER_SERIES, int(down)))
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE game_state SET current_down = ? WHERE game_id = ?",
+            (down, game_id),
+        )
+
+
+def next_down(game_id):
+    """Advance a down; past 4th it wraps to 1st (turnover on downs / new series)."""
+    state = get_game_state(game_id)
+    nxt = state["current_down"] + 1
+    set_down(game_id, 1 if nxt > DOWNS_PER_SERIES else nxt)
+
+
+# ---------- Scoring ----------
+
+def add_score(game_id, half, team, play_type, player_id=None):
+    """Record a scoring play using the rule book's point value."""
+    if play_type not in SCORING_PLAYS:
+        raise ValueError(f"Unknown scoring play: {play_type}")
+    points = SCORING_PLAYS[play_type]
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO scoring_plays
+               (game_id, half, team, play_type, points, player_id)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (game_id, half, team, play_type, points, player_id),
+        )
+    _recompute_score(game_id)
+
+
+def _recompute_score(game_id):
+    """Keep games.our_score / their_score in step with the scoring plays."""
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT team, SUM(points) FROM scoring_plays WHERE game_id = ? GROUP BY team",
+            (game_id,),
+        ).fetchall()
+        totals = {team: total for team, total in rows}
+        conn.execute(
+            "UPDATE games SET our_score = ?, their_score = ? WHERE game_id = ?",
+            (totals.get("us", 0), totals.get("them", 0), game_id),
+        )
+
+
+def get_scoring_plays(game_id):
+    with get_conn() as conn:
+        return pd.read_sql_query(
+            """SELECT s.score_id, s.half, s.team, s.play_type, s.points, p.name AS player
+               FROM scoring_plays s LEFT JOIN players p ON p.player_id = s.player_id
+               WHERE s.game_id = ? ORDER BY s.score_id""",
+            conn, params=(game_id,),
+        )
+
+
+def get_score(game_id):
+    with get_conn() as conn:
+        rows = conn.execute(
+            "SELECT team, SUM(points) FROM scoring_plays WHERE game_id = ? GROUP BY team",
+            (game_id,),
+        ).fetchall()
+    totals = {team: total for team, total in rows}
+    return int(totals.get("us", 0)), int(totals.get("them", 0))
+
+
+def undo_last_score(game_id):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT score_id FROM scoring_plays WHERE game_id = ? ORDER BY score_id DESC LIMIT 1",
+            (game_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        conn.execute("DELETE FROM scoring_plays WHERE score_id = ?", (row[0],))
+    _recompute_score(game_id)
+    return True
+
+
+def mercy_rule_in_effect(game_id):
+    """
+    True once either team leads by 3+ touchdowns. The rule only bites at the
+    second-half one-minute warning, so this is an early heads-up, not a verdict.
+    """
+    us, them = get_score(game_id)
+    return abs(us - them) >= MERCY_RULE_TD_MARGIN * SCORING_PLAYS["Touchdown"]
+
+
+# ---------- Penalties ----------
+
+def log_penalty(game_id, half, team, name):
+    yards = 3 if name in PENALTIES_3YD else 6
+    with get_conn() as conn:
+        conn.execute(
+            """INSERT INTO penalties (game_id, half, team, name, yards)
+               VALUES (?, ?, ?, ?, ?)""",
+            (game_id, half, team, name, yards),
+        )
+
+
+def get_penalties(game_id):
+    with get_conn() as conn:
+        return pd.read_sql_query(
+            """SELECT penalty_id, half, team, name, yards FROM penalties
+               WHERE game_id = ? ORDER BY penalty_id""",
+            conn, params=(game_id,),
+        )
+
+
+def undo_last_penalty(game_id):
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT penalty_id FROM penalties WHERE game_id = ? ORDER BY penalty_id DESC LIMIT 1",
+            (game_id,),
+        ).fetchone()
+        if row is None:
+            return False
+        conn.execute("DELETE FROM penalties WHERE penalty_id = ?", (row[0],))
+    return True

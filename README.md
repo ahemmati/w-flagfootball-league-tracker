@@ -1,8 +1,9 @@
-# 🏈 Flag Football Tracker
+# 🏈 Silver Dogs — W-5 Flag Football Tracker
 
 A Streamlit app for tracking playing time and stats during and across a youth
 flag football season, built for the sideline on a phone. It's designed around
-two specific rules from the Mt. Bethel W League rule sheet:
+the Mt. Bethel W League (1st & 2nd Grade) rule sheet. Built for **W-5, the
+Silver Dogs**. The two rules it actively tracks:
 
 1. **Every player must play an equal amount of time.**
 2. **Every player must run the ball or play QB for at least one snap, every game.**
@@ -32,7 +33,19 @@ shows what you actually spent there).
 
 **📋 Export Game Data** — one tap downloads a clean CSV of all player touches
 and snaps, at the end of a game or any time, so you can review season stats in
-a spreadsheet.
+a spreadsheet. Scoring plays and penalties export separately.
+
+**🏆 Rule-accurate scoring** — tap to score: touchdown 6, try 1 point from the
+3-yard line or 2 from the 7, safety 2. The running score is built from those
+values rather than typed in, and a banner appears once either side is
+3 touchdowns ahead (the mercy-rule margin).
+
+**🛑 Penalties & downs** — every penalty from the rule sheet as a button, split
+into 3-yard and 6-yard groups, plus a 1st-through-4th down tracker for the
+four downs you get to reach the next 9-yard zone.
+
+**📖 Full rules reference** — the complete rule sheet, on its own page, with a
+quick-reference version in the sidebar of every page.
 
 ## Roster & schedule
 
@@ -50,6 +63,8 @@ The roster and the season schedule are seeded automatically on first run:
 | Sat Oct 31, 2026 | 11:00 AM | W4 |
 
 Players: Ryan, Aidin, Rhett, Jacob, Patrick, Walker, Marshall, Lincoln, Julian.
+
+**Tap any game on the home page to open it directly on the Game Day tracker.**
 
 You can **add** players and games at any time from the Roster page. There is
 intentionally **no way to delete a player** — snap history points at the
@@ -80,7 +95,8 @@ app.py                          # Home: roster + schedule
 pages/1_🏈_Game_Day.py          # Live in-game tracking (the main sideline screen)
 pages/2_📊_Season_Dashboard.py  # Season-wide fairness, stats, compliance per game
 pages/3_📋_Export.py            # Per-game and season CSV exports
-ui.py                           # Shared styling + the play clock component
+pages/4_📖_Rules.py             # The full W League rule sheet
+ui.py                           # Shared styling, the countdown clocks, rules sidebar
 data_store.py                   # ALL database logic — nothing else touches SQLite
 ```
 
@@ -94,3 +110,11 @@ If you deploy to Streamlit Community Cloud, the SQLite file lives on ephemeral
 disk and **can reset on redeploy**. Download your CSVs after each game (the
 Export page) until you wire `data_store.py` up to a persistent backend such as
 Google Sheets, Supabase, or Postgres.
+
+## One inconsistency in the rule sheet
+
+The *Thirty-Five Second Clock (Rule Change)* section sets a **35-second** play
+clock, but the *Delay of Game* penalty still describes "violation of the **25**
+second clock." The "(Rule Change)" label suggests 35 is the current number and
+the penalty text wasn't updated, so this app counts down from 35. Worth
+confirming with your referee at the captains meeting.
