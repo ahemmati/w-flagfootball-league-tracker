@@ -1,72 +1,118 @@
 import streamlit as st
+import pandas as pd
 import data_store as ds
+from ui import inject_mobile_css, format_game_label
 
-st.set_page_config(page_title="Flag Football Tracker", page_icon="🏈", layout="wide")
+st.set_page_config(
+    page_title="Flag Football Tracker",
+    page_icon="🏈",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
 ds.init_db()
+inject_mobile_css()
 
 st.title("🏈 Flag Football Tracker")
-st.caption("Roster · use the sidebar to jump to Game Day tracking, the Season Dashboard, or Export.")
+st.caption(
+    "Mt. Bethel W League · Use the sidebar for Game Day tracking, "
+    "the Season Dashboard, and Export."
+)
 
+with st.sidebar:
+    st.header("📋 League Rules Quick Ref")
+    st.error(
+        "⚠️ **EQUAL PLAY RULE:** Every player must play an equal amount of time, "
+        "and **must** run the ball or play quarterback for at least one snap "
+        "each game."
+    )
+    st.info(
+        "⏱️ **TIMING:** Two 20-minute halves. Continuous clock until the final "
+        "minute of each half. **35-second play clock.**"
+    )
+    st.success(
+        "🔄 **NO CENTER SNAP:** QB starts with the ball in possession. The "
+        "center is immediately eligible to run a route."
+    )
+    st.warning(
+        "🛑 **PENALTIES:** 3-Yard (dead ball / technical) or 6-Yard "
+        "(live ball / contact)."
+    )
+    st.caption(f"**Timeouts:** {ds.TIMEOUTS_PER_HALF} per half.")
+
+# ---------------------------------------------------------------- Roster ----
 st.header("Roster")
 
-with st.form("add_player_form", clear_on_submit=True):
-    col1, col2, col3 = st.columns([3, 1, 1])
-    name = col1.text_input("Player name")
-    jersey = col2.text_input("Jersey #")
-    submitted = col3.form_submit_button("Add Player", use_container_width=True)
-    if submitted:
-        if name.strip():
-            ds.add_player(name, jersey)
-            st.success(f"Added {name}")
-            st.rerun()
-        else:
-            st.warning("Enter a name first.")
-
-st.divider()
-
-players = ds.get_players(active_only=False)
+players = ds.get_players()
 
 if players.empty:
-    st.info("No players yet — add your roster above to get started.")
+    st.info("No players yet — add your roster below.")
 else:
-    active = players[players["active"] == 1]
-    inactive = players[players["active"] == 0]
+    st.caption(f"{len(players)} players on the roster.")
+    cols = st.columns(3)
+    for i, p in enumerate(players.itertuples()):
+        with cols[i % 3]:
+            st.markdown(
+                f"<div class='roster-card'>{p.name}</div>",
+                unsafe_allow_html=True,
+            )
 
-    st.subheader(f"Active roster ({len(active)})")
-    for _, p in active.iterrows():
-        c1, c2, c3 = st.columns([3, 1, 1])
-        c1.write(f"**{p['name']}**  ·  #{p['jersey_number'] or '—'}")
-        if c3.button("Mark inactive", key=f"deact_{p['player_id']}"):
-            ds.set_player_active(p["player_id"], False)
+st.markdown("")
+with st.form("add_player_form", clear_on_submit=True):
+    st.markdown("**Add a player**")
+    col1, col2 = st.columns([3, 1])
+    name = col1.text_input(
+        "Player name", label_visibility="collapsed", placeholder="Player name"
+    )
+    submitted = col2.form_submit_button("➕ Add Player", width="stretch")
+    if submitted:
+        try:
+            ds.add_player(name)
+            st.success(f"Added {name.strip()} to the roster.")
             st.rerun()
+        except ValueError as err:
+            st.warning(str(err))
 
-    if not inactive.empty:
-        with st.expander(f"Inactive players ({len(inactive)})"):
-            for _, p in inactive.iterrows():
-                c1, c2 = st.columns([3, 1])
-                c1.write(f"{p['name']}  ·  #{p['jersey_number'] or '—'}")
-                if c2.button("Reactivate", key=f"react_{p['player_id']}"):
-                    ds.set_player_active(p["player_id"], True)
-                    st.rerun()
+st.caption(
+    "Players can be added at any time. Removing a player isn't supported on "
+    "purpose — snap history points at the roster, so deleting someone would "
+    "take their season stats with them."
+)
 
 st.divider()
-st.subheader("Games")
 
-with st.form("add_game_form", clear_on_submit=True):
-    col1, col2, col3 = st.columns([1, 2, 1])
-    game_date = col1.date_input("Date")
-    opponent = col2.text_input("Opponent")
-    add_game = col3.form_submit_button("Add Game", use_container_width=True)
-    if add_game:
-        ds.create_game(game_date, opponent)
-        st.success(f"Game vs {opponent} added — go to Game Day to track it.")
-        st.rerun()
+# -------------------------------------------------------------- Schedule ----
+st.header("Schedule")
 
-games = ds.get_games()
-if not games.empty:
+games = ds.get_games(ascending=True)
+if games.empty:
+    st.info("No games scheduled.")
+else:
+    overview = ds.get_compliance_overview()
+    display = games.copy()
+    display["Date"] = pd.to_datetime(display["game_date"]).dt.strftime("%a %b %-d, %Y")
+    display["Time"] = display["game_time"].fillna("")
+    display["Opponent"] = display["opponent"]
+    display["Us"] = display["our_score"]
+    display["Them"] = display["their_score"]
+    display["Equal Play"] = overview["Status"].values
+
     st.dataframe(
-        games[["game_date", "opponent", "our_score", "their_score"]]
-        .rename(columns={"game_date": "Date", "opponent": "Opponent",
-                          "our_score": "Us", "their_score": "Them"}),
-        use_container_width=True, hide_index=True,
+        display[["Date", "Time", "Opponent", "Us", "Them", "Equal Play"]],
+        width="stretch",
+        hide_index=True,
     )
+
+with st.expander("Add another game"):
+    with st.form("add_game_form", clear_on_submit=True):
+        col1, col2, col3, col4 = st.columns([2, 2, 2, 1])
+        game_date = col1.date_input("Date")
+        game_time = col2.text_input("Time", placeholder="9:00 AM")
+        opponent = col3.text_input("Opponent", placeholder="W5")
+        add_game = col4.form_submit_button("Add Game", width="stretch")
+        if add_game:
+            if opponent.strip():
+                ds.create_game(game_date, opponent, game_time)
+                st.success(f"Game vs {opponent.strip()} added.")
+                st.rerun()
+            else:
+                st.warning("Enter an opponent first.")
