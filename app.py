@@ -1,7 +1,7 @@
 import streamlit as st
 import pandas as pd
 import data_store as ds
-from ui import inject_mobile_css, format_game_label
+from ui import inject_mobile_css, format_game_label, check_data_store
 
 st.set_page_config(
     page_title="Flag Football Tracker",
@@ -9,6 +9,7 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded",
 )
+check_data_store()
 ds.init_db()
 inject_mobile_css()
 

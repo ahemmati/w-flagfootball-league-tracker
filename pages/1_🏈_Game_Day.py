@@ -4,12 +4,14 @@ import pandas as pd
 import streamlit as st
 
 import data_store as ds
-from ui import inject_mobile_css, format_game_label, play_clock
+from ui import (inject_mobile_css, format_game_label, play_clock,
+                check_data_store)
 
 st.set_page_config(
     page_title="Game Day", page_icon="🏈", layout="wide",
     initial_sidebar_state="collapsed",   # sideline mode: maximum screen space
 )
+check_data_store()
 ds.init_db()
 inject_mobile_css()
 

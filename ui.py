@@ -103,12 +103,19 @@ def format_game_label(row):
     return f"{pretty}{time} vs {row['opponent']}"
 
 
-def play_clock(seconds=ds.PLAY_CLOCK_SECONDS, height=320):
+def play_clock(seconds=None, height=320):
     """
     The 35-second play clock. Big enough to read at arm's length, turns red
     under 5 seconds so you can get the ball snapped before the 3-yard delay of
     game penalty.
     """
+    # Resolved when called, not in the signature. As a default argument this
+    # would read data_store while ui.py is still being imported, so a stale or
+    # half-loaded data_store took the entire app down at import instead of
+    # failing somewhere recoverable.
+    if seconds is None:
+        seconds = getattr(ds, "PLAY_CLOCK_SECONDS", 35)
+
     html = """
 <!-- self-contained: no external assets, so it works offline on the sideline -->
 <style>
@@ -238,3 +245,27 @@ def play_clock(seconds=ds.PLAY_CLOCK_SECONDS, height=320):
     else:  # pragma: no cover - older Streamlit
         import streamlit.components.v1 as components
         components.html(markup, height=height)
+
+
+# Everything the pages need from data_store. Checked up front so a stale
+# deployment (Streamlit Cloud serving an old data_store.py) produces a clear
+# instruction instead of an AttributeError halfway down a page.
+REQUIRED_DATA_STORE_API = [
+    "PLAY_CLOCK_SECONDS", "TIMEOUTS_PER_HALF", "log_touch", "get_game_state",
+    "timeouts_left", "use_timeout", "set_half", "get_game_summary",
+    "get_game_export", "get_compliance_overview", "undo_last_snap",
+]
+
+
+def check_data_store():
+    """Stop with a readable message if data_store is older than these pages."""
+    missing = [n for n in REQUIRED_DATA_STORE_API if not hasattr(ds, n)]
+    if missing:
+        st.error(
+            "**This deployment is out of date.** The app pages are newer than "
+            f"`data_store.py`, which is missing: `{'`, `'.join(missing)}`.\n\n"
+            "On Streamlit Community Cloud: open **Manage app → ⋮ → Reboot app** "
+            "(or *Clear cache*, then reboot) to force a fresh checkout. "
+            "Running locally, `git pull` and restart Streamlit."
+        )
+        st.stop()
