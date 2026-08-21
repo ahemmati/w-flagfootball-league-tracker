@@ -29,6 +29,13 @@ c2.metric("Halves", f"{ds.HALVES} × {ds.HALF_LENGTH_MINUTES} min")
 c3.metric("Timeouts", f"{ds.TIMEOUTS_PER_HALF}/half · {ds.TIMEOUT_SECONDS}s")
 c4.metric("Play clock", f"{ds.PLAY_CLOCK_SECONDS} sec")
 
+st.success(
+    "### 🔄 No center snap\n"
+    "**For W League only, there is no center snap.** The QB lines up behind "
+    "the center and **already has possession of the ball to start play**.\n\n"
+    "→ That's why this app counts field time in **plays**, not snaps."
+)
+
 st.divider()
 
 left, right = st.columns(2)
@@ -50,9 +57,10 @@ with left:
   visiting team calls the toss. The winner takes the first-half option or
   defers to the second half — either (1) offense/defense, or (2) which goal to
   defend.
-- **Coaches on field:** one coach on the field for offense and defense, at
-  least **five yards back** from the quarterback once the huddle breaks. First
-  violation is a warning, each one after that is a 3-yard penalty.
+- **Coaches on field:** for all **9 games**, one coach on the field for
+  offense and defense, at least **five yards back** from the quarterback once
+  the huddle breaks. First violation is a warning, each one after that is a
+  3-yard penalty.
 """
     )
 

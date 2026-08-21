@@ -17,9 +17,18 @@ the app tracks them live and tells you who still needs a turn.
 Anyone who hasn't had their mandatory quarterback or running back play yet is
 highlighted in **red (Needs Touch)**; once they've had it they turn green. The
 app tracks this for every game so you can confirm each one is **Compliant**.
-Tapping `QB` or `RUN` logs the mandatory play; `SNAP` logs field time only,
+Tapping `QB` or `RUN` logs the mandatory play; `PLAY` logs field time only,
 which counts toward equal playing time but deliberately does *not* satisfy the
 rule.
+
+There is **no center snap** in W League — the QB starts the play already
+holding the ball — so field time is counted in **plays**, never snaps.
+
+**↩️ Undo and reset** — every player card has its own `↩` button that takes back
+just that player's last entry, for when you tap the kid standing next to the
+right one. `Undo Last` steps back the most recent entry of any kind, and
+`Reset this game's log` clears a single game behind a confirmation, scoped so
+you can wipe a botched play log without losing a correct scoreboard.
 
 **⏱️ Active Play Clock** — a large, interactive 35-second play clock built for
 mobile screens. It turns **red below 5 seconds** to help you avoid the 3-yard

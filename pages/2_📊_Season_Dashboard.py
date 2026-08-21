@@ -41,7 +41,7 @@ if results:
     st.divider()
 
 season = ds.get_season_summary()
-played = season[season["Total Snaps"] > 0] if not season.empty else season
+played = season[season["Total Plays"] > 0] if not season.empty else season
 
 # ------------------------------------------------- Compliance at a glance ----
 st.subheader("⚖️ Equal Play Rule — every game")
@@ -74,9 +74,9 @@ if played.empty:
     st.stop()
 
 # ------------------------------------------------------- Playing time ----
-st.subheader("Total snaps per player")
+st.subheader("Total plays per player")
 st.caption("A gut-check on whether playing time is staying balanced season-long.")
-st.bar_chart(played.set_index("Player")["Total Snaps"])
+st.bar_chart(played.set_index("Player")["Total Plays"])
 
 st.subheader("Ball touches per player (QB + Runner)")
 st.caption("The other half of the rule: who is actually getting the ball.")
@@ -115,13 +115,13 @@ st.caption("Auto-drafted one-liners per player — edit freely before you use th
 for _, p in played.iterrows():
     blurb = (
         f"**{p['Player']}** — played {int(p['Games Played'])} game(s), "
-        f"{int(p['Total Snaps'])} total snaps"
+        f"{int(p['Total Plays'])} total plays"
     )
     extras = []
-    if p["QB Snaps"] > 0:
-        extras.append(f"took {int(p['QB Snaps'])} snap(s) at QB")
-    if p["Runner Snaps"] > 0:
-        extras.append(f"carried the ball {int(p['Runner Snaps'])} time(s)")
+    if p["QB Plays"] > 0:
+        extras.append(f"played {int(p['QB Plays'])} play(s) at QB")
+    if p["Runner Plays"] > 0:
+        extras.append(f"carried the ball {int(p['Runner Plays'])} time(s)")
     if p["Touchdowns"] > 0:
         extras.append(f"scored {int(p['Touchdowns'])} touchdown(s)")
     if extras:

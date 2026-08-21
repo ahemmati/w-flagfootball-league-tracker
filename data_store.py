@@ -8,8 +8,10 @@ survives redeploys), you rewrite the guts of these functions to hit Google
 Sheets / Supabase / whatever instead, and nothing in the UI pages has to change.
 
 Rules this schema is built to answer, straight from the league rule sheet:
-  - "Every player must play an equal amount of time" -> we track snaps per
+  - "Every player must play an equal amount of time" -> we track plays per
     player per game, so you can see imbalance as it happens, live.
+    (W League has NO CENTER SNAP -- the QB starts the play already holding
+    the ball -- so field time is counted in "plays", never "snaps".)
   - "Every player must either run the ball or play quarterback for at least
     one snap each game" -> every logged touch records the role, so the app can
     flag anyone who still needs their mandatory QB/Runner play.
@@ -417,8 +419,8 @@ def get_game_summary(game_id):
     Per-player snap counts and Equal Play Rule status for one game.
 
     'Needs Touch' is the league's mandatory-play rule: a player who has not
-    taken a snap at QB and has not carried the ball yet in this game. Those are
-    the kids the Game Day grid paints red.
+    played QB and has not carried the ball yet in this game. Those are the kids
+    the Game Day grid paints red.
     """
     players = get_players(active_only=True)
     snaps = get_game_snaps(game_id)
@@ -435,9 +437,9 @@ def get_game_summary(game_id):
         rows.append({
             "player_id": pid,
             "Player": p["name"],
-            "Snaps": len(p_snaps),
-            "QB Snaps": qb,
-            "Runner Snaps": run,
+            "Plays": len(p_snaps),
+            "QB Plays": qb,
+            "Runner Plays": run,
             "Touches": qb + run,
             "Touchdowns": int((p_snaps["event"] == "Touchdown").sum()) if not p_snaps.empty else 0,
         })
@@ -448,8 +450,8 @@ def get_game_summary(game_id):
 
     # Equal playing time: flag anyone more than one snap below the team average,
     # so you can even it out while there's still game left to do it in.
-    avg_snaps = df["Snaps"].mean()
-    df["Below Avg Snaps"] = df["Snaps"] < (avg_snaps - 1)
+    avg_plays = df["Plays"].mean()
+    df["Below Avg Plays"] = df["Plays"] < (avg_plays - 1)
     return df
 
 
@@ -467,7 +469,7 @@ def get_compliance_overview():
     rows = []
     for g in games.itertuples():
         summary = get_game_summary(g.game_id)
-        if summary.empty or summary["Snaps"].sum() == 0:
+        if summary.empty or summary["Plays"].sum() == 0:
             status, needs = "Not started", []
         else:
             needs = summary[summary["Needs Touch"]]["Player"].tolist()
@@ -502,15 +504,15 @@ def get_season_summary():
         rows.append({
             "Player": p["name"],
             "Games Played": games_played,
-            "Total Snaps": len(p_snaps),
-            "Avg Snaps/Game": round(len(p_snaps) / games_played, 1) if games_played else 0,
-            "QB Snaps": qb,
-            "Runner Snaps": run,
+            "Total Plays": len(p_snaps),
+            "Avg Plays/Game": round(len(p_snaps) / games_played, 1) if games_played else 0,
+            "QB Plays": qb,
+            "Runner Plays": run,
             "Total Touches": qb + run,
             "Touchdowns": int((p_snaps["event"] == "Touchdown").sum()) if not p_snaps.empty else 0,
         })
     df = pd.DataFrame(rows)
-    return df.sort_values("Total Snaps", ascending=False)
+    return df.sort_values("Total Plays", ascending=False)
 
 
 # ---------- Export ----------
@@ -533,7 +535,7 @@ def get_game_export(game_id):
         game_time = ""
     opponent = game.iloc[0]["opponent"] if not game.empty else ""
 
-    out = summary[["Player", "Snaps", "QB Snaps", "Runner Snaps",
+    out = summary[["Player", "Plays", "QB Plays", "Runner Plays",
                    "Touches", "Touchdowns"]].copy()
     out.insert(0, "Opponent", opponent)
     out.insert(0, "Time", game_time or "")
@@ -674,3 +676,57 @@ def undo_last_penalty(game_id):
             return False
         conn.execute("DELETE FROM penalties WHERE penalty_id = ?", (row[0],))
     return True
+
+
+def undo_last_play_for_player(game_id, player_id):
+    """
+    Remove the most recent play logged for one player. This is the fix for the
+    common sideline mistake -- tapping the kid standing next to the right one.
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            """SELECT snap_id FROM snaps WHERE game_id = ? AND player_id = ?
+               ORDER BY snap_id DESC LIMIT 1""",
+            (game_id, player_id),
+        ).fetchone()
+        if row is None:
+            return False
+        conn.execute("DELETE FROM snaps WHERE snap_id = ?", (row[0],))
+    return True
+
+
+def game_log_counts(game_id):
+    """What a reset would throw away, so the confirmation can spell it out."""
+    with get_conn() as conn:
+        plays = conn.execute(
+            "SELECT COUNT(*) FROM snaps WHERE game_id = ?", (game_id,)
+        ).fetchone()[0]
+        scores = conn.execute(
+            "SELECT COUNT(*) FROM scoring_plays WHERE game_id = ?", (game_id,)
+        ).fetchone()[0]
+        pens = conn.execute(
+            "SELECT COUNT(*) FROM penalties WHERE game_id = ?", (game_id,)
+        ).fetchone()[0]
+    return {"plays": plays, "scores": scores, "penalties": pens}
+
+
+def reset_game(game_id, plays=True, scores=True, penalties=True, state=True):
+    """
+    Wipe this game back to a clean slate. Scoped so you can clear a botched
+    play log without losing a correct scoreboard. Only ever affects one game.
+    """
+    with get_conn() as conn:
+        if plays:
+            conn.execute("DELETE FROM snaps WHERE game_id = ?", (game_id,))
+        if scores:
+            conn.execute("DELETE FROM scoring_plays WHERE game_id = ?", (game_id,))
+        if penalties:
+            conn.execute("DELETE FROM penalties WHERE game_id = ?", (game_id,))
+        if state:
+            conn.execute(
+                """UPDATE game_state SET current_half = 1, timeouts_used_h1 = 0,
+                   timeouts_used_h2 = 0, current_down = 1 WHERE game_id = ?""",
+                (game_id,),
+            )
+    if scores:
+        _recompute_score(game_id)

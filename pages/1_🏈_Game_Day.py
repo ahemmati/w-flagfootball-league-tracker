@@ -157,8 +157,13 @@ else:
 
 st.caption(
     "Tap **QB** or **RUN** the moment a kid takes their mandatory play. "
-    "**SNAP** logs field time only — it counts toward equal playing time but "
-    "does not satisfy the rule."
+    "**PLAY** logs field time only — it counts toward equal playing time but "
+    "does not satisfy the rule. Tap **↩** on a card to take back that player's "
+    "last entry if you tapped the wrong name."
+)
+st.caption(
+    "There is no center snap in W League — the QB starts the play already "
+    "holding the ball — so field time is counted in plays."
 )
 
 cols = st.columns(3)
@@ -174,12 +179,12 @@ for i, (_, row) in enumerate(summary.iterrows()):
             <div class='player-card {css}'>
               <div class='pc-name'>{row["Player"]}</div>
               <div class='pc-status'>{status}</div>
-              <div class='pc-meta'>{row["Snaps"]} snaps · QB {row["QB Snaps"]} · Run {row["Runner Snaps"]}</div>
+              <div class='pc-meta'>{row["Plays"]} plays · QB {row["QB Plays"]} · Run {row["Runner Plays"]}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        b1, b2, b3 = st.columns(3)
+        b1, b2, b3, b4 = st.columns([2, 2, 2, 1.4])
         pid = int(row["player_id"])
         if b1.button("QB", key=f"qb_{game_id}_{pid}", width="stretch"):
             ds.log_touch(game_id, half, pid, "QB")
@@ -187,8 +192,16 @@ for i, (_, row) in enumerate(summary.iterrows()):
         if b2.button("RUN", key=f"run_{game_id}_{pid}", width="stretch"):
             ds.log_touch(game_id, half, pid, "Runner")
             st.rerun()
-        if b3.button("SNAP", key=f"snap_{game_id}_{pid}", width="stretch"):
+        if b3.button("PLAY", key=f"play_{game_id}_{pid}", width="stretch"):
             ds.log_touch(game_id, half, pid, None)
+            st.rerun()
+        # Undo just this player -- for the mis-tap, not the whole log.
+        if b4.button(
+            "↩", key=f"undop_{game_id}_{pid}", width="stretch",
+            help=f"Undo {row['Player']}'s last entry",
+            disabled=int(row["Plays"]) == 0,
+        ):
+            ds.undo_last_play_for_player(game_id, pid)
             st.rerun()
 
 st.markdown("")
@@ -201,7 +214,7 @@ if u1.button("↩️ Undo Last", width="stretch", key="undo"):
         st.warning("Nothing logged for this game yet.")
 
 # Equal playing time is the other half of the rule — surface it separately.
-below = summary[summary["Below Avg Snaps"]]["Player"].tolist()
+below = summary[summary["Below Avg Plays"]]["Player"].tolist()
 if below:
     u2.warning(f"⚠️ Below average playing time: {', '.join(below)}")
 
@@ -318,7 +331,7 @@ st.divider()
 # ------------------------------------------------------------- Live stats ----
 st.subheader("Live Stats")
 st.dataframe(
-    summary[["Player", "Snaps", "QB Snaps", "Runner Snaps", "Touches",
+    summary[["Player", "Plays", "QB Plays", "Runner Plays", "Touches",
              "Touchdowns", "Met QB/Runner Rule"]],
     width="stretch", hide_index=True,
 )
@@ -335,3 +348,42 @@ else:
         file_name=f"{ds.TEAM_CODE}_{game_row['game_date']}_vs_{game_row['opponent']}.csv",
         mime="text/csv", width="stretch", type="primary",
     )
+
+st.divider()
+
+# ------------------------------------------------------------------ Reset ----
+with st.expander("🗑️ Reset this game's log"):
+    counts = ds.game_log_counts(game_id)
+    st.caption(
+        "Clears this game only — every other game keeps its data. Use the "
+        "**↩** button on a player card first if you only need to take back one "
+        "mistaken entry."
+    )
+    st.markdown(
+        f"Currently logged: **{counts['plays']} plays**, "
+        f"**{counts['scores']} scoring plays**, **{counts['penalties']} penalties**."
+    )
+    what = st.multiselect(
+        "What to clear",
+        ["Player plays & touches", "Scoring", "Penalties", "Down & timeouts"],
+        default=["Player plays & touches"],
+        key="reset_scope",
+    )
+    confirm = st.checkbox(
+        f"Yes, permanently clear this for {game_row['game_date']} vs "
+        f"{game_row['opponent']}",
+        key="reset_confirm",
+    )
+    if st.button(
+        "🗑️ Reset", type="primary", width="stretch",
+        disabled=not (what and confirm), key="reset_game",
+    ):
+        ds.reset_game(
+            game_id,
+            plays="Player plays & touches" in what,
+            scores="Scoring" in what,
+            penalties="Penalties" in what,
+            state="Down & timeouts" in what,
+        )
+        st.success("Game log reset.")
+        st.rerun()

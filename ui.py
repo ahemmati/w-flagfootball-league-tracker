@@ -343,7 +343,7 @@ def rules_sidebar():
         )
         st.success(
             "🔄 **NO CENTER SNAP:** The QB lines up behind the center and "
-            "starts the play already holding the ball. **All players are "
+            "**already has the ball** to start play. **All players are "
             "eligible receivers. NO motion.**"
         )
         st.warning(
