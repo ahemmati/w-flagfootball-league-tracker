@@ -49,13 +49,29 @@ FIELD_LENGTH_YARDS = 47
 START_YARD_LINE = 7           # no kick-off; receiving team starts on its own 7
 MERCY_RULE_TD_MARGIN = 3      # 3+ TDs ahead at the 2nd-half one-minute warning
 
-# Scoring, and what each play is worth.
+# Scoring, and what each play is worth. These are the only point values the
+# W League sheet actually states: a touchdown is 6, and the try is 1 from the
+# 3-yard line or 2 from the 7. All three are scored by a player, so all three
+# get a button on every player's card.
 SCORING_PLAYS = {
     "Touchdown": 6,
     "Try — 1 pt (3 yd line)": 1,
     "Try — 2 pt (7 yd line)": 2,
-    "Safety": 2,
 }
+
+# A safety is different. The rule sheet mentions it ONLY as a clock-stoppage
+# event ("Safety - starts on the snap") and never assigns it a point value.
+# The sheet defers anything it doesn't cover to the NIRSA and NFHS rule books,
+# where a safety is worth 2 -- so that's the default here, but it is an
+# inference rather than a Mt. Bethel rule, and the coach can change the number
+# when logging it. It also credits the defense, not an individual player, which
+# is the other reason it isn't on the player cards.
+UNSPECIFIED_SCORING = {"Safety": 2}
+SAFETY_NOTE = (
+    "The W League sheet doesn't assign a safety a point value — it only lists "
+    "one as stopping the clock. 2 points is the NIRSA/NFHS default the sheet "
+    "falls back to. Change it if your referee rules otherwise."
+)
 
 # Penalties, split by the yardage the rule sheet assigns them.
 PENALTIES_3YD = [
@@ -438,11 +454,16 @@ def get_game_summary(game_id):
     players = get_players(active_only=True)
     snaps = get_game_snaps(game_id)
     # Touchdowns live in scoring_plays, not on the play rows.
-    tds = get_scoring_plays(game_id)
-    td_by_player = {}
-    if not tds.empty:
-        scored = tds[tds["play_type"] == "Touchdown"]
-        td_by_player = scored["player"].value_counts().to_dict()
+    scoring = get_scoring_plays(game_id)
+    td_by_player, points_by_player = {}, {}
+    if not scoring.empty:
+        credited = scoring[scoring["player"].notna()]
+        td_by_player = (
+            credited[credited["play_type"] == "Touchdown"]["player"]
+            .value_counts().to_dict()
+        )
+        # All points this player put on the board -- touchdowns and tries.
+        points_by_player = credited.groupby("player")["points"].sum().to_dict()
 
     if players.empty:
         return pd.DataFrame()
@@ -461,6 +482,7 @@ def get_game_summary(game_id):
             "Runner Plays": run,
             "QB/Run Plays": qb + run,
             "Touchdowns": int(td_by_player.get(p["name"], 0)),
+            "Points": int(points_by_player.get(p["name"], 0)),
         })
     df = pd.DataFrame(rows)
 
@@ -509,11 +531,18 @@ def get_season_summary():
     players = get_players(active_only=True)
     with get_conn() as conn:
         snaps = pd.read_sql_query("SELECT * FROM snaps", conn)
-        season_tds = pd.read_sql_query(
-            """SELECT p.name AS player FROM scoring_plays s
-               JOIN players p ON p.player_id = s.player_id
-               WHERE s.play_type = 'Touchdown'""", conn)
-    td_counts = season_tds["player"].value_counts().to_dict() if not season_tds.empty else {}
+        season_scores = pd.read_sql_query(
+            """SELECT p.name AS player, s.play_type, s.points
+               FROM scoring_plays s
+               JOIN players p ON p.player_id = s.player_id""", conn)
+    if season_scores.empty:
+        td_counts, point_counts = {}, {}
+    else:
+        td_counts = (
+            season_scores[season_scores["play_type"] == "Touchdown"]["player"]
+            .value_counts().to_dict()
+        )
+        point_counts = season_scores.groupby("player")["points"].sum().to_dict()
 
     if players.empty:
         return pd.DataFrame()
@@ -534,6 +563,7 @@ def get_season_summary():
             "Runner Plays": run,
             "Total QB/Run Plays": qb + run,
             "Touchdowns": int(td_counts.get(p["name"], 0)),
+            "Points Scored": int(point_counts.get(p["name"], 0)),
         })
     df = pd.DataFrame(rows)
     return df.sort_values("Total Plays", ascending=False)
@@ -560,7 +590,7 @@ def get_game_export(game_id):
     opponent = game.iloc[0]["opponent"] if not game.empty else ""
 
     out = summary[["Player", "Plays", "QB Plays", "Runner Plays",
-                   "QB/Run Plays", "Touchdowns"]].copy()
+                   "QB/Run Plays", "Touchdowns", "Points"]].copy()
     out.insert(0, "Opponent", opponent)
     out.insert(0, "Time", game_time or "")
     out.insert(0, "Date", game_date)
@@ -598,11 +628,19 @@ def next_down(game_id):
 
 # ---------- Scoring ----------
 
-def add_score(game_id, half, team, play_type, player_id=None):
-    """Record a scoring play using the rule book's point value."""
-    if play_type not in SCORING_PLAYS:
-        raise ValueError(f"Unknown scoring play: {play_type}")
-    points = SCORING_PLAYS[play_type]
+def add_score(game_id, half, team, play_type, player_id=None, points=None):
+    """
+    Record a scoring play. `points` defaults to the rule sheet's value, and is
+    only passed explicitly for a safety, whose value the sheet never states.
+    """
+    if points is None:
+        if play_type in SCORING_PLAYS:
+            points = SCORING_PLAYS[play_type]
+        elif play_type in UNSPECIFIED_SCORING:
+            points = UNSPECIFIED_SCORING[play_type]
+        else:
+            raise ValueError(f"Unknown scoring play: {play_type}")
+    points = int(points)
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO scoring_plays

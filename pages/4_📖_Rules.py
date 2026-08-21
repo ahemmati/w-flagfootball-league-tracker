@@ -96,13 +96,25 @@ with left:
     st.subheader("Scoring")
     st.markdown(
         """
+The rule sheet states exactly two ways to put points on the board:
+
 - **Touchdown — 6 points.** The runner advances from the field of play so the
   ball breaks the vertical plane of the opponent's goal line.
-- **Try:** the referee asks the offense beforehand — from the **3-yard line for
-  1 point** or the **7-yard line for 2 points**. Once chosen it can only be
-  changed if either team takes a timeout, and never because of a penalty.
-- **Safety — 2 points.**
+- **The Try / extra point — 1 or 2 points.** After a touchdown the offense
+  attempts a try from scrimmage. The referee asks the offense beforehand, and
+  the coach must choose **before the play**: from the **3-yard line for 1
+  point**, or the **7-yard line for 2 points**. Once chosen it can only be
+  changed if either team takes a timeout, and it **cannot** be changed because
+  a penalty occurs.
 """
+    )
+    st.info(
+        "**Safety — no point value given.** The sheet mentions a safety only "
+        "as something that stops the clock (*\"Safety - starts on the snap\"*) "
+        "and never says what it's worth. Under the NIRSA and NFHS rule books "
+        "the sheet defers to, a safety is **2 points**, which is what this app "
+        "defaults to — but you can change the number when you log one, and it "
+        "is worth settling at the captains meeting."
     )
 
 with right:

@@ -179,7 +179,10 @@ for i, (_, row) in enumerate(summary.iterrows()):
         css = "needs-touch" if needs_touch else "has-touch"
         status = "⚠ NEEDS QB / RUN" if needs_touch else "✓ RULE MET"
         tds = int(row["Touchdowns"])
+        pts = int(row["Points"])
         td_meta = f" · 🏈 {tds} TD" if tds else ""
+        if pts:
+            td_meta += f" · {pts} pts"
         st.markdown(
             f"""
             <div class='player-card {css}'>
@@ -201,21 +204,30 @@ for i, (_, row) in enumerate(summary.iterrows()):
             ds.log_touch(game_id, half, pid, None)
             st.rerun()
 
-        b4, b5 = st.columns([2, 1])
-        # Scores 6 for the team and credits this player. Scoring only -- if he
-        # ran it in, tap RUN too; a receiving TD never satisfies the rule.
-        if b4.button(
-            "🏈 TD +6", key=f"td_{game_id}_{pid}", width="stretch",
-            help=f"Touchdown scored by {row['Player']} (+6)",
+        # Every way a player can put points on the board, credited to him.
+        # Scoring only -- if he ran it in, tap RUN too; scoring never satisfies
+        # the QB/Run rule on its own.
+        s1, s2, s3 = st.columns(3)
+        for col, (play_type, short) in zip(
+            (s1, s2, s3),
+            (("Touchdown", "🏈 TD +6"),
+             ("Try — 1 pt (3 yd line)", "TRY +1"),
+             ("Try — 2 pt (7 yd line)", "TRY +2")),
         ):
-            ds.add_score(game_id, half, "us", "Touchdown", player_id=pid)
-            st.toast(f"Touchdown — {row['Player']}!")
-            st.rerun()
+            if col.button(
+                short, key=f"score_{play_type}_{game_id}_{pid}", width="stretch",
+                help=f"{play_type} by {row['Player']} "
+                     f"(+{ds.SCORING_PLAYS[play_type]})",
+            ):
+                ds.add_score(game_id, half, "us", play_type, player_id=pid)
+                st.toast(f"{short.strip('🏈 ')} — {row['Player']}!")
+                st.rerun()
+
         # Undo just this player -- for the mis-tap, not the whole log.
-        if b5.button(
-            "↩", key=f"undop_{game_id}_{pid}", width="stretch",
+        if st.button(
+            "↩ Undo", key=f"undop_{game_id}_{pid}", width="stretch",
             help=f"Undo {row['Player']}'s last entry",
-            disabled=int(row["Plays"]) == 0 and int(row["Touchdowns"]) == 0,
+            disabled=int(row["Plays"]) == 0 and int(row["Points"]) == 0,
         ):
             ds.undo_last_entry_for_player(game_id, pid)
             st.rerun()
@@ -282,9 +294,10 @@ st.caption(
 )
 
 st.caption(
-    f"Touchdowns are credited to a player with the **🏈 TD +6** button on their "
-    f"card above. The buttons here are for {ds.TEAM_NAME} scores you don't need "
-    "credited to anyone, and for the opponent."
+    f"Every player's card above has **🏈 TD +6**, **TRY +1** and **TRY +2** "
+    f"buttons that credit the score to them. The buttons here are for "
+    f"{ds.TEAM_NAME} scores you don't need credited to anyone, and for the "
+    "opponent."
 )
 
 for team, team_label in (("us", ds.TEAM_NAME), ("them", str(game_row["opponent"]))):
@@ -297,6 +310,27 @@ for team, team_label in (("us", ds.TEAM_NAME), ("them", str(game_row["opponent"]
         ):
             ds.add_score(game_id, half, team, play_type)
             st.rerun()
+
+# A safety credits the defense, and the rule sheet never states its value, so
+# it sits apart from the plays whose points the sheet actually specifies.
+st.markdown("**Safety**")
+st.caption(ds.SAFETY_NOTE)
+sa1, sa2, sa3 = st.columns([1, 1, 1])
+safety_points = sa1.number_input(
+    "Points", min_value=1, max_value=6,
+    value=ds.UNSPECIFIED_SCORING["Safety"], key=f"safety_pts_{game_id}",
+)
+if sa2.button(
+    f"🛡️ Safety — {ds.TEAM_NAME}", key=f"safety_us_{game_id}", width="stretch"
+):
+    ds.add_score(game_id, half, "us", "Safety", points=safety_points)
+    st.rerun()
+if sa3.button(
+    f"🛡️ Safety — {game_row['opponent']}", key=f"safety_them_{game_id}",
+    width="stretch",
+):
+    ds.add_score(game_id, half, "them", "Safety", points=safety_points)
+    st.rerun()
 
 sc1, sc2 = st.columns([1, 3])
 if sc1.button("↩️ Undo Last Score", width="stretch", key="undo_score"):
@@ -354,7 +388,7 @@ st.divider()
 st.subheader("Live Stats")
 st.dataframe(
     summary[["Player", "Plays", "QB Plays", "Runner Plays", "QB/Run Plays",
-             "Touchdowns", "Met QB/Runner Rule"]],
+             "Touchdowns", "Points", "Met QB/Runner Rule"]],
     width="stretch", hide_index=True,
 )
 

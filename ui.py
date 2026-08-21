@@ -358,7 +358,8 @@ def rules_sidebar():
             f"{ds.TIMEOUT_SECONDS} seconds each · "
             f"**Play clock:** {ds.PLAY_CLOCK_SECONDS} sec · "
             f"**{ds.PLAYERS_ON_FIELD} players** a side · "
-            f"**Scoring:** TD 6, try 1 (3 yd) or 2 (7 yd), safety 2 · "
+            f"**Scoring:** TD 6, try 1 (3 yd) or 2 (7 yd); the sheet gives "
+            f"no value for a safety · "
             f"**Mercy rule:** {ds.MERCY_RULE_TD_MARGIN}+ TDs ahead at the "
             "second-half one-minute warning."
         )

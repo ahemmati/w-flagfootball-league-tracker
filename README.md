@@ -26,11 +26,17 @@ the mandatory-involvement rule, so they leave a player red.
 There is **no center snap** in W League — the QB starts the play already
 holding the ball — so field time is counted in **plays**, never snaps.
 
-**🏈 Touchdowns per player** — every player card has a `🏈 TD +6` button that
-credits the touchdown to that player and adds 6 to the score. Credited
-touchdowns flow through to the live stats, the season dashboard, and the CSV
-exports. It's scoring only: if he ran it in, tap `RUN` as well, because a
-receiving touchdown doesn't satisfy the QB/Run rule.
+**🏈 Scoring per player** — every player card has a button for each way the
+rule sheet says you can score: `🏈 TD +6`, `TRY +1` (from the 3-yard line) and
+`TRY +2` (from the 7). One tap credits the score to that player and updates
+the scoreboard, and their touchdowns and points flow through to the live
+stats, the season dashboard, and the CSV exports. It's scoring only: if he ran
+it in, tap `RUN` as well, because scoring alone doesn't satisfy the QB/Run
+rule.
+
+A **safety** sits with the team-level scoring instead, because it credits the
+defense rather than a player — and because the rule sheet never assigns it a
+point value (see below).
 
 **↩️ Undo and reset** — every player card has its own `↩` button that takes back
 just that player's last entry — a play or a touchdown, whichever came last —
@@ -135,3 +141,12 @@ clock, but the *Delay of Game* penalty still describes "violation of the **25**
 second clock." The "(Rule Change)" label suggests 35 is the current number and
 the penalty text wasn't updated, so this app counts down from 35. Worth
 confirming with your referee at the captains meeting.
+
+## The safety has no stated point value
+
+The rule sheet lists exactly two ways to score: a **touchdown (6)** and the
+**try (1 point from the 3-yard line, 2 from the 7)**. A safety appears only in
+the clock rules — *"Safety - starts on the snap"* — and is never assigned a
+value. Under the NIRSA and NFHS rule books the sheet defers to, a safety is
+worth 2, so that's this app's default, but the number is editable when you log
+one. Worth settling at the captains meeting.
