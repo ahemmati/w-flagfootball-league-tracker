@@ -333,7 +333,8 @@ def rules_sidebar():
         st.error(
             "⚠️ **EQUAL PLAY RULE:** Every player must play an equal amount of "
             "time, and **must** run the ball or play quarterback for at least "
-            "one snap each game."
+            "one snap each game. **Only those two actions count** — center, "
+            "blocking, and receptions do not."
         )
         st.info(
             f"⏱️ **TIMING:** Two {ds.HALF_LENGTH_MINUTES}-minute halves, "

@@ -17,9 +17,11 @@ the app tracks them live and tells you who still needs a turn.
 Anyone who hasn't had their mandatory quarterback or running back play yet is
 highlighted in **red (Needs Touch)**; once they've had it they turn green. The
 app tracks this for every game so you can confirm each one is **Compliant**.
-Tapping `QB` or `RUN` logs the mandatory play; `PLAY` logs field time only,
-which counts toward equal playing time but deliberately does *not* satisfy the
-rule.
+**Only two actions satisfy the rule: running the ball, or playing
+quarterback.** Tapping `QB` or `RUN` logs it. `PLAY` logs field time only —
+playing center, blocking, and catching a pass (including catching a
+touchdown) count toward equal playing time but deliberately do *not* satisfy
+the mandatory-involvement rule, so they leave a player red.
 
 There is **no center snap** in W League — the QB starts the play already
 holding the ball — so field time is counted in **plays**, never snaps.

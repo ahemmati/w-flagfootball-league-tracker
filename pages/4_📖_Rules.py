@@ -20,6 +20,13 @@ st.error(
     "Every player must play an **equal amount of time**. Every player must "
     "**either run the ball or play quarterback for at least one snap each "
     "game**.\n\n"
+    "**Only two actions satisfy it:**\n"
+    "1. **Running the ball**\n"
+    "2. **Playing quarterback**\n\n"
+    "Every player on the roster must do at least one of those, at least once, "
+    "every game. Other common offensive actions — **playing center, blocking, "
+    "or catching a pass** (including catching a touchdown) — do **not** count "
+    "toward this rule, though they do count toward equal playing time.\n\n"
     "→ The Game Day page flags anyone still owed their mandatory play in red."
 )
 

@@ -141,7 +141,7 @@ st.divider()
 
 # -------------------------------------------- Equal Play Rule Check grid ----
 summary = ds.get_game_summary(game_id)
-needs = summary[summary["Needs Touch"]]["Player"].tolist()
+needs = summary[summary["Needs QB/Run"]]["Player"].tolist()
 
 st.subheader("⚖️ Equal Play Rule Check")
 
@@ -156,14 +156,15 @@ else:
     )
 
 st.caption(
-    "Tap **QB** or **RUN** the moment a kid takes their mandatory play. "
-    "**PLAY** logs field time only — it counts toward equal playing time but "
-    "does not satisfy the rule. Tap **↩** on a card to take back that player's "
-    "last entry if you tapped the wrong name."
-)
-st.caption(
-    "There is no center snap in W League — the QB starts the play already "
-    "holding the ball — so field time is counted in plays."
+    "**Only two things satisfy this rule: running the ball, or playing "
+    "quarterback.** Tap **QB** or **RUN** the moment a kid does one of them.\n\n"
+    "**PLAY** logs field time only. Playing center, blocking, and catching a "
+    "pass — including catching a touchdown — all count toward equal playing "
+    "time but do **not** satisfy the mandatory-involvement rule, so they leave "
+    "a player red.\n\n"
+    "Tap **↩** on a card to take back that player's last entry if you tapped "
+    "the wrong name. There is no center snap in W League — the QB starts the "
+    "play already holding the ball — so field time is counted in plays."
 )
 
 cols = st.columns(3)
@@ -171,9 +172,9 @@ cols = st.columns(3)
 # so you build muscle memory for where each kid's buttons are.
 for i, (_, row) in enumerate(summary.iterrows()):
     with cols[i % 3]:
-        needs_touch = bool(row["Needs Touch"])
+        needs_touch = bool(row["Needs QB/Run"])
         css = "needs-touch" if needs_touch else "has-touch"
-        status = "⚠ NEEDS TOUCH" if needs_touch else "✓ RULE MET"
+        status = "⚠ NEEDS QB / RUN" if needs_touch else "✓ RULE MET"
         st.markdown(
             f"""
             <div class='player-card {css}'>
@@ -265,6 +266,20 @@ st.caption(
     "Touchdown 6 · try 1 point from the 3-yard line or 2 from the 7 · safety 2."
 )
 
+# Who scored, so touchdowns land against a player. Left on "—" it still
+# scores, it just isn't credited to anyone -- keeps it a single tap.
+scorer = st.selectbox(
+    f"Scored by ({ds.TEAM_NAME}) — optional",
+    options=[None] + summary["player_id"].tolist(),
+    format_func=lambda pid: "—" if pid is None
+    else summary.set_index("player_id").loc[pid, "Player"],
+    key=f"scorer_{game_id}",
+)
+st.caption(
+    "Credit is for the stat sheet only — a receiving touchdown still doesn't "
+    "satisfy the QB/Run rule."
+)
+
 for team, team_label in (("us", ds.TEAM_NAME), ("them", str(game_row["opponent"]))):
     st.markdown(f"**{team_label}**")
     score_cols = st.columns(len(ds.SCORING_PLAYS))
@@ -273,7 +288,10 @@ for team, team_label in (("us", ds.TEAM_NAME), ("them", str(game_row["opponent"]
             f"{play_type.replace('Try — ', 'Try ')} (+{points})",
             key=f"score_{team}_{play_type}_{game_id}", width="stretch",
         ):
-            ds.add_score(game_id, half, team, play_type)
+            ds.add_score(
+                game_id, half, team, play_type,
+                player_id=scorer if team == "us" else None,
+            )
             st.rerun()
 
 sc1, sc2 = st.columns([1, 3])
@@ -331,7 +349,7 @@ st.divider()
 # ------------------------------------------------------------- Live stats ----
 st.subheader("Live Stats")
 st.dataframe(
-    summary[["Player", "Plays", "QB Plays", "Runner Plays", "Touches",
+    summary[["Player", "Plays", "QB Plays", "Runner Plays", "QB/Run Plays",
              "Touchdowns", "Met QB/Runner Rule"]],
     width="stretch", hide_index=True,
 )

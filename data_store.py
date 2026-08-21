@@ -418,12 +418,20 @@ def get_game_summary(game_id):
     """
     Per-player snap counts and Equal Play Rule status for one game.
 
-    'Needs Touch' is the league's mandatory-play rule: a player who has not
-    played QB and has not carried the ball yet in this game. Those are the kids
+    'Needs QB/Run' is the league's mandatory-play rule. ONLY two actions
+    satisfy it: carrying the ball, or playing quarterback. Field time, playing
+    center, blocking, and catching a pass -- including catching a touchdown --
+    do not count, so none of them clear this flag. Those players are the ones
     the Game Day grid paints red.
     """
     players = get_players(active_only=True)
     snaps = get_game_snaps(game_id)
+    # Touchdowns live in scoring_plays, not on the play rows.
+    tds = get_scoring_plays(game_id)
+    td_by_player = {}
+    if not tds.empty:
+        scored = tds[tds["play_type"] == "Touchdown"]
+        td_by_player = scored["player"].value_counts().to_dict()
 
     if players.empty:
         return pd.DataFrame()
@@ -440,13 +448,13 @@ def get_game_summary(game_id):
             "Plays": len(p_snaps),
             "QB Plays": qb,
             "Runner Plays": run,
-            "Touches": qb + run,
-            "Touchdowns": int((p_snaps["event"] == "Touchdown").sum()) if not p_snaps.empty else 0,
+            "QB/Run Plays": qb + run,
+            "Touchdowns": int(td_by_player.get(p["name"], 0)),
         })
     df = pd.DataFrame(rows)
 
-    df["Met QB/Runner Rule"] = df["Touches"] > 0
-    df["Needs Touch"] = ~df["Met QB/Runner Rule"]
+    df["Met QB/Runner Rule"] = df["QB/Run Plays"] > 0
+    df["Needs QB/Run"] = ~df["Met QB/Runner Rule"]
 
     # Equal playing time: flag anyone more than one snap below the team average,
     # so you can even it out while there's still game left to do it in.
@@ -472,14 +480,14 @@ def get_compliance_overview():
         if summary.empty or summary["Plays"].sum() == 0:
             status, needs = "Not started", []
         else:
-            needs = summary[summary["Needs Touch"]]["Player"].tolist()
-            status = "Compliant" if not needs else "Needs touches"
+            needs = summary[summary["Needs QB/Run"]]["Player"].tolist()
+            status = "Compliant" if not needs else "Needs QB/Run"
         rows.append({
             "Date": g.game_date,
             "Time": getattr(g, "game_time", "") or "",
             "Opponent": g.opponent,
             "Status": status,
-            "Still Needs Touch": ", ".join(needs),
+            "Still Needs QB/Run": ", ".join(needs),
         })
     return pd.DataFrame(rows)
 
@@ -490,6 +498,11 @@ def get_season_summary():
     players = get_players(active_only=True)
     with get_conn() as conn:
         snaps = pd.read_sql_query("SELECT * FROM snaps", conn)
+        season_tds = pd.read_sql_query(
+            """SELECT p.name AS player FROM scoring_plays s
+               JOIN players p ON p.player_id = s.player_id
+               WHERE s.play_type = 'Touchdown'""", conn)
+    td_counts = season_tds["player"].value_counts().to_dict() if not season_tds.empty else {}
 
     if players.empty:
         return pd.DataFrame()
@@ -508,8 +521,8 @@ def get_season_summary():
             "Avg Plays/Game": round(len(p_snaps) / games_played, 1) if games_played else 0,
             "QB Plays": qb,
             "Runner Plays": run,
-            "Total Touches": qb + run,
-            "Touchdowns": int((p_snaps["event"] == "Touchdown").sum()) if not p_snaps.empty else 0,
+            "Total QB/Run Plays": qb + run,
+            "Touchdowns": int(td_counts.get(p["name"], 0)),
         })
     df = pd.DataFrame(rows)
     return df.sort_values("Total Plays", ascending=False)
@@ -536,7 +549,7 @@ def get_game_export(game_id):
     opponent = game.iloc[0]["opponent"] if not game.empty else ""
 
     out = summary[["Player", "Plays", "QB Plays", "Runner Plays",
-                   "Touches", "Touchdowns"]].copy()
+                   "QB/Run Plays", "Touchdowns"]].copy()
     out.insert(0, "Opponent", opponent)
     out.insert(0, "Time", game_time or "")
     out.insert(0, "Date", game_date)

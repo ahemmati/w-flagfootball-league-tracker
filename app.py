@@ -52,9 +52,9 @@ else:
 
         rule_badge = {
             "Compliant": "⚖️ Equal Play met",
-            "Needs touches": "⚠️ Touches still owed",
+            "Needs QB/Run": "⚠️ QB/Run still owed",
             "Not started": "",
-        }[status]
+        }.get(status, "")
 
         c1, c2, c3 = st.columns([4, 2, 2])
         with c1:

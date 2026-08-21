@@ -63,7 +63,7 @@ else:
         c3.metric("Need touches", len(tracked) - compliant)
 
     st.dataframe(
-        overview.rename(columns={"Still Needs Touch": "Still Needs a Touch"}),
+        overview.rename(columns={"Still Needs QB/Run": "Still Needs QB / Run"}),
         width="stretch", hide_index=True,
     )
 
@@ -78,9 +78,9 @@ st.subheader("Total plays per player")
 st.caption("A gut-check on whether playing time is staying balanced season-long.")
 st.bar_chart(played.set_index("Player")["Total Plays"])
 
-st.subheader("Ball touches per player (QB + Runner)")
-st.caption("The other half of the rule: who is actually getting the ball.")
-st.bar_chart(played.set_index("Player")["Total Touches"])
+st.subheader("Qualifying plays per player (QB + Runner)")
+st.caption("The only two actions that satisfy the mandatory-involvement rule: carrying the ball, or playing quarterback.")
+st.bar_chart(played.set_index("Player")["Total QB/Run Plays"])
 
 st.subheader("Full season stats")
 st.dataframe(season, width="stretch", hide_index=True)
