@@ -26,9 +26,15 @@ the mandatory-involvement rule, so they leave a player red.
 There is **no center snap** in W League — the QB starts the play already
 holding the ball — so field time is counted in **plays**, never snaps.
 
+**🏈 Touchdowns per player** — every player card has a `🏈 TD +6` button that
+credits the touchdown to that player and adds 6 to the score. Credited
+touchdowns flow through to the live stats, the season dashboard, and the CSV
+exports. It's scoring only: if he ran it in, tap `RUN` as well, because a
+receiving touchdown doesn't satisfy the QB/Run rule.
+
 **↩️ Undo and reset** — every player card has its own `↩` button that takes back
-just that player's last entry, for when you tap the kid standing next to the
-right one. `Undo Last` steps back the most recent entry of any kind, and
+just that player's last entry — a play or a touchdown, whichever came last —
+for when you tap the kid standing next to the right one. `Undo Last` steps back the most recent entry of any kind, and
 `Reset this game's log` clears a single game behind a confirmation, scoped so
 you can wipe a botched play log without losing a correct scoreboard.
 

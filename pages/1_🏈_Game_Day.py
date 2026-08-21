@@ -162,6 +162,8 @@ st.caption(
     "pass — including catching a touchdown — all count toward equal playing "
     "time but do **not** satisfy the mandatory-involvement rule, so they leave "
     "a player red.\n\n"
+    "**🏈 TD +6** credits a touchdown to that player and adds 6 to the score. "
+    "It's scoring only — if he ran it in, tap **RUN** as well.\n\n"
     "Tap **↩** on a card to take back that player's last entry if you tapped "
     "the wrong name. There is no center snap in W League — the QB starts the "
     "play already holding the ball — so field time is counted in plays."
@@ -172,21 +174,23 @@ cols = st.columns(3)
 # so you build muscle memory for where each kid's buttons are.
 for i, (_, row) in enumerate(summary.iterrows()):
     with cols[i % 3]:
+        pid = int(row["player_id"])
         needs_touch = bool(row["Needs QB/Run"])
         css = "needs-touch" if needs_touch else "has-touch"
         status = "⚠ NEEDS QB / RUN" if needs_touch else "✓ RULE MET"
+        tds = int(row["Touchdowns"])
+        td_meta = f" · 🏈 {tds} TD" if tds else ""
         st.markdown(
             f"""
             <div class='player-card {css}'>
               <div class='pc-name'>{row["Player"]}</div>
               <div class='pc-status'>{status}</div>
-              <div class='pc-meta'>{row["Plays"]} plays · QB {row["QB Plays"]} · Run {row["Runner Plays"]}</div>
+              <div class='pc-meta'>{row["Plays"]} plays · QB {row["QB Plays"]} · Run {row["Runner Plays"]}{td_meta}</div>
             </div>
             """,
             unsafe_allow_html=True,
         )
-        b1, b2, b3, b4 = st.columns([2, 2, 2, 1.4])
-        pid = int(row["player_id"])
+        b1, b2, b3 = st.columns(3)
         if b1.button("QB", key=f"qb_{game_id}_{pid}", width="stretch"):
             ds.log_touch(game_id, half, pid, "QB")
             st.rerun()
@@ -196,13 +200,24 @@ for i, (_, row) in enumerate(summary.iterrows()):
         if b3.button("PLAY", key=f"play_{game_id}_{pid}", width="stretch"):
             ds.log_touch(game_id, half, pid, None)
             st.rerun()
-        # Undo just this player -- for the mis-tap, not the whole log.
+
+        b4, b5 = st.columns([2, 1])
+        # Scores 6 for the team and credits this player. Scoring only -- if he
+        # ran it in, tap RUN too; a receiving TD never satisfies the rule.
         if b4.button(
+            "🏈 TD +6", key=f"td_{game_id}_{pid}", width="stretch",
+            help=f"Touchdown scored by {row['Player']} (+6)",
+        ):
+            ds.add_score(game_id, half, "us", "Touchdown", player_id=pid)
+            st.toast(f"Touchdown — {row['Player']}!")
+            st.rerun()
+        # Undo just this player -- for the mis-tap, not the whole log.
+        if b5.button(
             "↩", key=f"undop_{game_id}_{pid}", width="stretch",
             help=f"Undo {row['Player']}'s last entry",
-            disabled=int(row["Plays"]) == 0,
+            disabled=int(row["Plays"]) == 0 and int(row["Touchdowns"]) == 0,
         ):
-            ds.undo_last_play_for_player(game_id, pid)
+            ds.undo_last_entry_for_player(game_id, pid)
             st.rerun()
 
 st.markdown("")
@@ -266,18 +281,10 @@ st.caption(
     "Touchdown 6 · try 1 point from the 3-yard line or 2 from the 7 · safety 2."
 )
 
-# Who scored, so touchdowns land against a player. Left on "—" it still
-# scores, it just isn't credited to anyone -- keeps it a single tap.
-scorer = st.selectbox(
-    f"Scored by ({ds.TEAM_NAME}) — optional",
-    options=[None] + summary["player_id"].tolist(),
-    format_func=lambda pid: "—" if pid is None
-    else summary.set_index("player_id").loc[pid, "Player"],
-    key=f"scorer_{game_id}",
-)
 st.caption(
-    "Credit is for the stat sheet only — a receiving touchdown still doesn't "
-    "satisfy the QB/Run rule."
+    f"Touchdowns are credited to a player with the **🏈 TD +6** button on their "
+    f"card above. The buttons here are for {ds.TEAM_NAME} scores you don't need "
+    "credited to anyone, and for the opponent."
 )
 
 for team, team_label in (("us", ds.TEAM_NAME), ("them", str(game_row["opponent"]))):
@@ -288,10 +295,7 @@ for team, team_label in (("us", ds.TEAM_NAME), ("them", str(game_row["opponent"]
             f"{play_type.replace('Try — ', 'Try ')} (+{points})",
             key=f"score_{team}_{play_type}_{game_id}", width="stretch",
         ):
-            ds.add_score(
-                game_id, half, team, play_type,
-                player_id=scorer if team == "us" else None,
-            )
+            ds.add_score(game_id, half, team, play_type)
             st.rerun()
 
 sc1, sc2 = st.columns([1, 3])

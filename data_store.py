@@ -20,6 +20,7 @@ Rules this schema is built to answer, straight from the league rule sheet:
 """
 
 import sqlite3
+from datetime import datetime
 from pathlib import Path
 from contextlib import contextmanager
 import pandas as pd
@@ -188,6 +189,12 @@ def init_db():
             conn.execute("ALTER TABLE games ADD COLUMN game_time TEXT")
         if "jersey_number" in _columns(conn, "players"):
             conn.execute("ALTER TABLE players DROP COLUMN jersey_number")
+        # Written by Python (microsecond precision) rather than SQLite's
+        # CURRENT_TIMESTAMP, which only resolves to the second and would tie
+        # when a coach taps twice quickly.
+        for table in ("snaps", "scoring_plays"):
+            if "created_at" not in _columns(conn, table):
+                conn.execute(f"ALTER TABLE {table} ADD COLUMN created_at TEXT")
         if "current_down" not in _columns(conn, "game_state"):
             conn.execute(
                 "ALTER TABLE game_state ADD COLUMN current_down INTEGER NOT NULL DEFAULT 1"
@@ -363,9 +370,11 @@ def log_touch(game_id, half, player_id, role, side="offense", event=None):
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO snaps
-               (game_id, half, play_number, player_id, side, role, event)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (game_id, half, play_number, player_id, side, role, event),
+               (game_id, half, play_number, player_id, side, role, event,
+                created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            (game_id, half, play_number, player_id, side, role, event,
+             datetime.now().isoformat()),
         )
 
 
@@ -386,9 +395,11 @@ def log_play(game_id, half, on_field_player_ids, qb_id=None, runner_id=None,
             row_event = event if (event and pid == event_player_id) else None
             conn.execute(
                 """INSERT INTO snaps
-                   (game_id, half, play_number, player_id, side, role, event)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (game_id, half, play_number, pid, side, role, row_event),
+                   (game_id, half, play_number, player_id, side, role, event,
+                    created_at)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (game_id, half, play_number, pid, side, role, row_event,
+                 datetime.now().isoformat()),
             )
 
 
@@ -595,9 +606,10 @@ def add_score(game_id, half, team, play_type, player_id=None):
     with get_conn() as conn:
         conn.execute(
             """INSERT INTO scoring_plays
-               (game_id, half, team, play_type, points, player_id)
-               VALUES (?, ?, ?, ?, ?, ?)""",
-            (game_id, half, team, play_type, points, player_id),
+               (game_id, half, team, play_type, points, player_id, created_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (game_id, half, team, play_type, points, player_id,
+             datetime.now().isoformat()),
         )
     _recompute_score(game_id)
 
@@ -743,3 +755,46 @@ def reset_game(game_id, plays=True, scores=True, penalties=True, state=True):
             )
     if scores:
         _recompute_score(game_id)
+
+
+def undo_last_entry_for_player(game_id, player_id):
+    """
+    Take back whatever was logged most recently for one player -- a play or a
+    scoring play, whichever came last. This is what the card's undo button
+    calls, so one button covers every kind of mis-tap on that kid.
+
+    Returns "play", "score", or None if there was nothing to undo.
+    """
+    with get_conn() as conn:
+        snap = conn.execute(
+            """SELECT snap_id, created_at FROM snaps
+               WHERE game_id = ? AND player_id = ?
+               ORDER BY created_at IS NULL, created_at DESC, snap_id DESC
+               LIMIT 1""",
+            (game_id, player_id),
+        ).fetchone()
+        score = conn.execute(
+            """SELECT score_id, created_at FROM scoring_plays
+               WHERE game_id = ? AND player_id = ?
+               ORDER BY created_at IS NULL, created_at DESC, score_id DESC
+               LIMIT 1""",
+            (game_id, player_id),
+        ).fetchone()
+
+    if snap is None and score is None:
+        return None
+    # A missing timestamp means the row predates this column, so treat it as
+    # older than anything stamped.
+    snap_at = (snap[1] or "") if snap else None
+    score_at = (score[1] or "") if score else None
+
+    take_score = snap is None or (score is not None and score_at >= snap_at)
+    if take_score:
+        with get_conn() as conn:
+            conn.execute("DELETE FROM scoring_plays WHERE score_id = ?", (score[0],))
+        _recompute_score(game_id)
+        return "score"
+
+    with get_conn() as conn:
+        conn.execute("DELETE FROM snaps WHERE snap_id = ?", (snap[0],))
+    return "play"
